@@ -25,17 +25,12 @@ ICON_PATHS = [
     os.path.join(ASSET_DIR, "Item", "sushi.png"),
 ]
 
-GAME_WIDTH, GAME_HEIGHT = 1200, 675
-
 # ---------- LOAD LOCAL IMAGE ----------
-def load_local_image(path, size=None, keep_ratio=False):
+def load_local_image(path, size=None):
     try:
         img = Image.open(path).convert("RGBA")
         if size:
-            if keep_ratio:
-                img.thumbnail(size, Image.LANCZOS)
-            else:
-                img = img.resize(size, Image.LANCZOS)
+            img = img.resize(size, Image.LANCZOS)
         return ImageTk.PhotoImage(img)
     except Exception as e:
         print("Error loading:", path, e)
@@ -52,56 +47,52 @@ class MemoryGame:
         self.buttons = []
         self.paused = False
 
-        # grid size và card size theo level (giảm 6px mỗi cấp)
+        # cấu hình level: rows, cols, card_size, max_moves, time_limit
         if level == 1:  
-            self.rows, self.cols, card_size = 2, 2, 64
+            self.rows, self.cols, card_size, self.max_moves, self.time_left = 2, 2, 64, 4, 30
         elif level == 2:  
-            self.rows, self.cols, card_size = 4, 4, 58
+            self.rows, self.cols, card_size, self.max_moves, self.time_left = 4, 4, 58, 16, 60
         elif level == 3:  
-            self.rows, self.cols, card_size = 6, 6, 52
-        elif level == 4:  
-            self.rows, self.cols, card_size = 8, 8, 46
-        elif level == 5:  
-            self.rows, self.cols, card_size = 16, 16, 40
-        elif level == 6:  
-            self.rows, self.cols, card_size = 32, 32, 34
+            self.rows, self.cols, card_size, self.max_moves, self.time_left = 6, 6, 52, 46, 120
 
         total = self.rows * self.cols
         needed_icons = total // 2
 
-        # load icons theo kích thước card_size
         self.icons = [load_local_image(path, (card_size, card_size)) for path in ICON_PATHS[:needed_icons]]
-
-        # prepare values
         self.values = list(range(needed_icons)) * 2
         random.shuffle(self.values)
 
-        # clear window
         for w in self.root.winfo_children():
             w.destroy()
 
-        # background
-        bg = load_local_image(BG_NORMAL, (GAME_WIDTH, GAME_HEIGHT), keep_ratio=True)
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+
+        # đặt background trong lúc chơi
+        bg = load_local_image(BG_NORMAL, (screen_w, screen_h))
         bg_label = tk.Label(self.root, image=bg)
         bg_label.image = bg
         bg_label.place(x=0, y=0)
 
-        # move counter
-        self.move_label = tk.Label(self.root, text="Moves: 0", font=("Arial", 14, "bold"),
-                                   bg="#ffffff")
+        # labels
+        self.move_label = tk.Label(self.root, text=f"Số Lần Lật: 0 / {self.max_moves}", 
+                                   font=("Arial", 14, "bold"), bg="#ffffff")
         self.move_label.pack(pady=5)
+
+        self.time_label = tk.Label(self.root, text=f"Thời Gian: {self.time_left}s",
+                                   font=("Arial", 14, "bold"), bg="#ffffff")
+        self.time_label.pack(pady=5)
 
         # control buttons
         control_frame = tk.Frame(self.root, bg="#ffffff")
         control_frame.pack(pady=5)
-        tk.Button(control_frame, text="Pause", command=self.toggle_pause).pack(side="left", padx=5)
-        tk.Button(control_frame, text="Quit", command=self.quit_game, bg="lightcoral").pack(side="left", padx=5)
+        tk.Button(control_frame, text="Tạm Dừng", command=self.toggle_pause).pack(side="left", padx=5)
+        tk.Button(control_frame, text="Thoát", command=self.quit_game, bg="lightcoral").pack(side="left", padx=5)
 
-        # frame
+        # frame chứa các lá bài
         frame = tk.Frame(self.root, bg="#ffffff")
         frame.pack(expand=True)
 
-        # card back
         self.card_back = load_local_image(CARD_BACK, (card_size, card_size))
 
         index = 0
@@ -119,30 +110,43 @@ class MemoryGame:
                 index += 1
             self.buttons.append(row_buttons)
 
+        # bắt đầu đếm thời gian
+        self.update_timer()
+
     def toggle_pause(self):
         self.paused = not self.paused
         if self.paused:
-            self.move_label.config(text=f"Moves: {self.moves} (Paused)")
+            self.move_label.config(text=f"Số Lần Lật: {self.moves} / {self.max_moves} (Tạm Dừng)")
         else:
             self.update_moves()
 
     def update_moves(self):
-        self.move_label.config(text=f"Moves: {self.moves}")
+        self.move_label.config(text=f"Số Lần Lật: {self.moves} / {self.max_moves}")
+        if self.moves > self.max_moves:
+            self.lose_screen()
+
+    def update_timer(self):
+        if self.paused:
+            self.root.after(1000, self.update_timer)
+            return
+        if self.time_left > 0:
+            self.time_left -= 1
+            mins, secs = divmod(self.time_left, 60)
+            self.time_label.config(text=f"Thời Gian: {mins:02d}:{secs:02d}")
+            self.root.after(1000, self.update_timer)
+        else:
+            self.lose_screen()
 
     def flip(self, index):
         if self.paused:
             return
-
         r = index // self.cols
         c = index % self.cols
         btn = self.buttons[r][c]
-
         if btn["state"] == "disabled":
             return
-
         btn.config(image=self.icons[self.values[index]], bg="yellow")
         btn.update()
-
         if not self.first:
             self.first = (index, btn)
         else:
@@ -152,16 +156,16 @@ class MemoryGame:
             self.root.after(500, self.check_match)
 
     def check_match(self):
+        if not self.first or not self.second:
+            return
         i1, b1 = self.first
         i2, b2 = self.second
-
         if self.values[i1] == self.values[i2]:
             b1.config(state="disabled", bg="lightgreen")
             b2.config(state="disabled", bg="lightgreen")
         else:
             b1.config(image=self.card_back, bg="lightblue")
             b2.config(image=self.card_back, bg="lightblue")
-
         self.first = None
         self.second = None
         self.check_win()
@@ -174,77 +178,78 @@ class MemoryGame:
         self.win_screen()
 
     def win_screen(self):
-        # clear window, không đổi cửa sổ
         for w in self.root.winfo_children():
             w.destroy()
-
         self.root.title("YOU WIN")
-
-        bg = load_local_image(BG_WIN, (GAME_WIDTH, GAME_HEIGHT), keep_ratio=True)
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        bg = load_local_image(BG_WIN, (screen_w, screen_h))
         bg_label = tk.Label(self.root, image=bg)
         bg_label.image = bg
         bg_label.place(x=0, y=0)
+        tk.Label(self.root, text="🎉Chiến Thắng🎉", font=("Arial", 32, "bold"), bg="#ffffff").pack(pady=20)
+        tk.Label(self.root, text=f"Số Lần Lật: {self.moves}", font=("Arial", 24), bg="#ffffff").pack(pady=10)
+        tk.Button(self.root, text="Chơi Lại", font=("Arial", 20), command=lambda: start_menu(self.root)).pack(pady=10)
+        tk.Button(self.root, text="Thoát", font=("Arial", 20), bg="lightcoral", command=self.root.destroy).pack(pady=10)
 
-        tk.Label(self.root, text="🎉YOU WIN!🎉",
-                 font=("Arial", 32, "bold"), bg="#ffffff").pack(pady=20)
-
-        tk.Label(self.root, text=f"Total Moves: {self.moves}",
-                 font=("Arial", 24), bg="#ffffff").pack(pady=10)
-
-        tk.Button(self.root, text="Play Again", font=("Arial", 20),
-                  command=lambda: start_menu(self.root)).pack(pady=10)
-
-        tk.Button(self.root, text="Quit Game", font=("Arial", 20),
-                  bg="lightcoral", command=self.root.destroy).pack(pady=10)
+    def lose_screen(self):
+        for w in self.root.winfo_children():
+            w.destroy()
+        self.root.title("YOU LOSE")
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        bg = load_local_image(BG_NORMAL, (screen_w, screen_h))
+        bg_label = tk.Label(self.root, image=bg)
+        bg_label.image = bg
+        bg_label.place(x=0, y=0)
+        tk.Label(self.root, text="💀Thất Bại💀", font=("Arial", 32, "bold"), bg="#ffffff").pack(pady=20)
+        tk.Label(self.root, text=f"Số Lần Lật: {self.moves} / {self.max_moves}", font=("Arial", 24), bg="#ffffff").pack(pady=10)
+        tk.Label(self.root, text=f"Hết Thời Gian", font=("Arial", 24), bg="#ffffff").pack(pady=10)
+        tk.Button(self.root, text="Thử Lại", font=("Arial", 20), command=lambda: start_menu(self.root)).pack(pady=10)
+        tk.Button(self.root, text="Thoát", font=("Arial", 20), bg="lightcoral", command=self.root.destroy).pack(pady=10)
 
     def quit_game(self):
         start_menu(self.root)
 
 
-# ---------- MENU ----------
 def start_menu(root=None):
     if root is None:
         root = tk.Tk()
         root.title("Memory Game")
-        root.geometry(f"{GAME_WIDTH}x{GAME_HEIGHT}")
+        root.attributes("-fullscreen", True)
 
-    # clear window
     for w in root.winfo_children():
         w.destroy()
 
-    bg = load_local_image(BG_NORMAL, (GAME_WIDTH, GAME_HEIGHT), keep_ratio=True)
+    screen_w = root.winfo_screenwidth()
+    screen_h = root.winfo_screenheight()
+
+    bg = load_local_image(BG_NORMAL, (screen_w, screen_h))
     bg_label = tk.Label(root, image=bg)
     bg_label.image = bg
     bg_label.place(x=0, y=0)
 
-    tk.Label(root, text="MEMORY GAME", font=("Arial", 32, "bold"),
-             bg="#ffffff").pack(pady=20)
-
-    tk.Label(root, text="Lựa Chọn Cấp Độ", font=("Arial", 24, "bold"),
-             bg="#ffffff").pack(pady=5)
+    tk.Label(root, text="MEMORY GAME", font=("Arial", 32, "bold"), bg="#ffffff").pack(pady=20)
+    tk.Label(root, text="Lựa Chọn Cấp Độ", font=("Arial", 24, "bold"), bg="#ffffff").pack(pady=5)
 
     def start(level):
-        # khi chọn level thì load game ngay trong cùng cửa sổ
         MemoryGame(root, level)
 
     level_frame = tk.Frame(root, bg="#ffffff")
     level_frame.pack(pady=20)
 
-    tk.Button(level_frame, text="Cấp Độ 1\n(2x2)", font=("Arial", 18, "bold"),
+    tk.Button(level_frame, text="Cấp Độ 1\n(2x2, 4 bước, 30s)", font=("Arial", 18, "bold"),
               command=lambda: start(1)).grid(row=0, column=0, padx=30, pady=10)
-    tk.Button(level_frame, text="Cấp Độ 2\n(4x4)", font=("Arial", 18, "bold"),
+    tk.Button(level_frame, text="Cấp Độ 2\n(4x4, 16 bước, 60s)", font=("Arial", 18, "bold"),
               command=lambda: start(2)).grid(row=1, column=0, padx=30, pady=10)
-    tk.Button(level_frame, text="Cấp Độ 3\n(6x6)", font=("Arial", 18, "bold"),
+    tk.Button(level_frame, text="Cấp Độ 3\n(6x6, 46 bước, 120s)", font=("Arial", 18, "bold"),
               command=lambda: start(3)).grid(row=2, column=0, padx=30, pady=10)
 
-    tk.Button(level_frame, text="Cấp Độ 4\n(8x8)", font=("Arial", 18, "bold"),
-              command=lambda: start(4)).grid(row=0, column=1, padx=30, pady=10)
-    tk.Button(level_frame, text="Cấp Độ 5\n(16x16)", font=("Arial", 18, "bold"),
-              command=lambda: start(5)).grid(row=1, column=1, padx=30, pady=10)
-    tk.Button(level_frame, text="Cấp Độ 6\n(32x32)", font=("Arial", 18, "bold"),
-              command=lambda: start(6)).grid(row=2, column=1, padx=30, pady=10)
-
-    tk.Button(root, text="Quit Game", font=("Arial", 18),
+    tk.Button(root, text="Thoát", font=("Arial", 18),
               bg="lightcoral", command=root.destroy).pack(pady=30)
+
     root.mainloop()
+
+
+# chạy game
 start_menu()
